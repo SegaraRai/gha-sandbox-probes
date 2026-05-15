@@ -16,6 +16,18 @@ inherit_env_block="${INPUT_INHERIT_ENV:-auto}"
 unsafe_env_block="${INPUT_UNSAFE_ENV:-}"
 unsafe_inherit_env_block="${INPUT_UNSAFE_INHERIT_ENV:-}"
 disable_checks="${INPUT_DISABLE_CHECKS:-}"
+tmp_dir="$(mktemp -d)"
+command_file="$tmp_dir/command.sh"
+
+cleanup() {
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
+
+{
+  printf '%s\n' 'set -Eeuo pipefail'
+  printf '%s\n' "$command"
+} > "$command_file"
 
 if [ ! -f "$probe_script" ]; then
   echo "::error::Probe script was not found: $probe_script"
@@ -172,10 +184,10 @@ docker_args=(
   --env TMPDIR=/tmp
   --env "SANDBOX_IMAGE=$image"
   --env "SANDBOX_NETWORK=$network"
-  --env SANDBOX_COMMAND="$command"
   --env "GHA_SANDBOX_DISABLE_CHECKS=$disable_checks"
   --volume "$workspace:/workspace:ro"
   --volume "$repo_dir/scripts:/probe-scripts:ro"
+  --volume "$command_file:/probe-command.sh:ro"
   --workdir /tmp
 )
 
@@ -298,6 +310,6 @@ for name in "${sandbox_allowed_names[@]}"; do
 done
 
 echo "gha-sandbox-probes: running sandbox command"
-env -i "${allowed_env[@]}" bash -lc "$SANDBOX_COMMAND"
+env -i "${allowed_env[@]}" bash /probe-command.sh
 echo "gha-sandbox-probes: sandbox command completed"
 SANDBOX_SCRIPT
