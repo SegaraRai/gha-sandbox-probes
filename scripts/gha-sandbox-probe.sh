@@ -74,6 +74,80 @@ has_url_credentials() {
   [[ "$1" =~ ://[^/@]+@ ]]
 }
 
+normalize_check_name() {
+  local name="${1,,}"
+  name="${name//_/-}"
+
+  case "$name" in
+    container | require-container)
+      printf 'container-marker'
+      ;;
+    cap | caps | capability | capabilities | zero-caps | require-zero-caps)
+      printf 'zero-capabilities'
+      ;;
+    env | environment | environment-variables)
+      printf 'environment'
+      ;;
+    credentials | credential-files)
+      printf 'credential-files'
+      ;;
+    metadata | cloud-metadata)
+      printf 'cloud-metadata'
+      ;;
+    aws-metadata | metadata-aws)
+      printf 'cloud-metadata-aws'
+      ;;
+    azure-metadata | metadata-azure)
+      printf 'cloud-metadata-azure'
+      ;;
+    gcp-metadata | google-metadata | metadata-gcp | metadata-google)
+      printf 'cloud-metadata-gcp'
+      ;;
+    readonly | read-only | readonly-path | readonly-paths | read-only-paths)
+      printf 'readonly-paths'
+      ;;
+    *)
+      printf '%s' "$name"
+      ;;
+  esac
+}
+
+is_check_disabled() {
+  local expected disabled_check disabled_checks normalized
+  expected="$(normalize_check_name "$1")"
+  disabled_checks="${GHA_SANDBOX_DISABLE_CHECKS:-}"
+  disabled_checks="${disabled_checks//,/ }"
+
+  for disabled_check in $disabled_checks; do
+    [ -n "$disabled_check" ] || continue
+    normalized="$(normalize_check_name "$disabled_check")"
+
+    case "$normalized:$expected" in
+      all-risk-accepted:* | \
+      "$expected:$expected" | \
+      cloud-metadata:cloud-metadata-aws | \
+      cloud-metadata:cloud-metadata-azure | \
+      cloud-metadata:cloud-metadata-gcp)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+run_risk_accepted_check() {
+  local check_name="$1"
+  shift
+
+  if is_check_disabled "$check_name"; then
+    notice "Sandbox probe check disabled by explicit risk acceptance: $(normalize_check_name "$check_name")"
+    return
+  fi
+
+  "$@"
+}
+
 is_allowed_env_name() {
   local expected="$1"
   local allowed_names="${GHA_SANDBOX_ALLOWED_ENV_NAMES:-${SANDBOX_ALLOWED_ENV_NAMES:-}}"
@@ -108,10 +182,6 @@ require_linux_proc() {
 }
 
 require_container_marker() {
-  if [ "${GHA_SANDBOX_REQUIRE_CONTAINER:-1}" = "0" ]; then
-    return
-  fi
-
   if [ -f /.dockerenv ]; then
     return
   fi
@@ -124,10 +194,6 @@ require_container_marker() {
 }
 
 require_zero_capabilities() {
-  if [ "${GHA_SANDBOX_REQUIRE_ZERO_CAPS:-1}" = "0" ]; then
-    return
-  fi
-
   local cap_eff
   cap_eff="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
 
@@ -175,6 +241,11 @@ deny_docker_daemon_access() {
 }
 
 deny_actions_runtime_credentials() {
+  if is_check_disabled environment; then
+    notice "Sandbox probe check disabled by explicit risk acceptance: environment"
+    return
+  fi
+
   local key value
   local keys=(
     ACTIONS_CACHE_SERVICE_V2
@@ -276,6 +347,11 @@ file_has_secret_marker() {
 }
 
 deny_credential_files() {
+  if is_check_disabled credential-files; then
+    notice "Sandbox probe check disabled by explicit risk acceptance: credential-files"
+    return
+  fi
+
   local path home real_path seen_token_paths
 
   local service_account_tokens=(
@@ -370,41 +446,54 @@ http_body() {
 }
 
 deny_cloud_metadata_access() {
-  if [ "${GHA_SANDBOX_CHECK_METADATA:-1}" = "0" ]; then
-    return
-  fi
-
   local aws_token token_response response response_body
 
-  token_response="$(metadata_response PUT 169.254.169.254 /latest/api/token 'X-aws-ec2-metadata-token-ttl-seconds: 60')"
-  if grep -Eiq 'HTTP/[0-9.]+ 200' <<< "$token_response"; then
-    aws_token="$(http_body <<< "$token_response" | head -n 1)"
+  if is_check_disabled cloud-metadata-aws; then
+    notice "Sandbox probe check disabled by explicit risk acceptance: cloud-metadata-aws"
   else
-    aws_token=""
+    token_response="$(metadata_response PUT 169.254.169.254 /latest/api/token 'X-aws-ec2-metadata-token-ttl-seconds: 60')"
+    if grep -Eiq 'HTTP/[0-9.]+ 200' <<< "$token_response"; then
+      aws_token="$(http_body <<< "$token_response" | head -n 1)"
+    else
+      aws_token=""
+    fi
+
+    if [ -n "$aws_token" ]; then
+      response="$(metadata_response GET 169.254.169.254 /latest/meta-data/iam/security-credentials/ "X-aws-ec2-metadata-token: $aws_token")"
+    else
+      response="$(metadata_response GET 169.254.169.254 /latest/meta-data/iam/security-credentials/)"
+    fi
+    response_body="$(http_body <<< "$response")"
+    if grep -Eiq 'HTTP/[0-9.]+ 200' <<< "$response" && [ -n "$response_body" ]; then
+      error "AWS metadata credentials appear reachable from inside the sandbox"
+    fi
   fi
 
-  if [ -n "$aws_token" ]; then
-    response="$(metadata_response GET 169.254.169.254 /latest/meta-data/iam/security-credentials/ "X-aws-ec2-metadata-token: $aws_token")"
+  if is_check_disabled cloud-metadata-azure; then
+    notice "Sandbox probe check disabled by explicit risk acceptance: cloud-metadata-azure"
   else
-    response="$(metadata_response GET 169.254.169.254 /latest/meta-data/iam/security-credentials/)"
-  fi
-  response_body="$(http_body <<< "$response")"
-  if grep -Eiq 'HTTP/[0-9.]+ 200' <<< "$response" && [ -n "$response_body" ]; then
-    error "AWS metadata credentials appear reachable from inside the sandbox"
-  fi
-
-  response="$(metadata_response GET 169.254.169.254 '/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F' 'Metadata: true')"
-  if grep -Eiq '"access_token"[[:space:]]*:' <<< "$response"; then
-    error "Azure managed identity token appears reachable from inside the sandbox"
+    response="$(metadata_response GET 169.254.169.254 '/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F' 'Metadata: true')"
+    if grep -Eiq '"access_token"[[:space:]]*:' <<< "$response"; then
+      error "Azure managed identity token appears reachable from inside the sandbox"
+    fi
   fi
 
-  response="$(metadata_response GET metadata.google.internal /computeMetadata/v1/instance/service-accounts/default/token 'Metadata-Flavor: Google')"
-  if grep -Eiq '"access_token"[[:space:]]*:' <<< "$response"; then
-    error "Google Cloud service account token appears reachable from inside the sandbox"
+  if is_check_disabled cloud-metadata-gcp; then
+    notice "Sandbox probe check disabled by explicit risk acceptance: cloud-metadata-gcp"
+  else
+    response="$(metadata_response GET metadata.google.internal /computeMetadata/v1/instance/service-accounts/default/token 'Metadata-Flavor: Google')"
+    if grep -Eiq '"access_token"[[:space:]]*:' <<< "$response"; then
+      error "Google Cloud service account token appears reachable from inside the sandbox"
+    fi
   fi
 }
 
 deny_writable_readonly_paths() {
+  if is_check_disabled readonly-paths; then
+    notice "Sandbox probe check disabled by explicit risk acceptance: readonly-paths"
+    return
+  fi
+
   local path
   local paths="${GHA_SANDBOX_READONLY_PATHS:-/workspace}"
 
@@ -417,8 +506,18 @@ deny_writable_readonly_paths() {
 
 main() {
   require_linux_proc
-  require_container_marker
-  require_zero_capabilities
+  if [ "${GHA_SANDBOX_REQUIRE_CONTAINER:-1}" = "0" ]; then
+    GHA_SANDBOX_DISABLE_CHECKS="${GHA_SANDBOX_DISABLE_CHECKS:-} container-marker"
+  fi
+  if [ "${GHA_SANDBOX_REQUIRE_ZERO_CAPS:-1}" = "0" ]; then
+    GHA_SANDBOX_DISABLE_CHECKS="${GHA_SANDBOX_DISABLE_CHECKS:-} zero-capabilities"
+  fi
+  if [ "${GHA_SANDBOX_CHECK_METADATA:-1}" = "0" ]; then
+    GHA_SANDBOX_DISABLE_CHECKS="${GHA_SANDBOX_DISABLE_CHECKS:-} cloud-metadata"
+  fi
+
+  run_risk_accepted_check container-marker require_container_marker
+  run_risk_accepted_check zero-capabilities require_zero_capabilities
   deny_docker_daemon_access
   deny_actions_runtime_credentials
   deny_host_runner_process_visibility

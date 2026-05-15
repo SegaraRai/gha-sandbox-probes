@@ -13,6 +13,7 @@ pids_limit="${INPUT_PIDS_LIMIT:-512}"
 network="${INPUT_NETWORK:-bridge}"
 env_block="${INPUT_ENV:-}"
 inherit_env_block="${INPUT_INHERIT_ENV:-auto}"
+disable_checks="${INPUT_DISABLE_CHECKS:-}"
 
 if [ ! -f "$probe_script" ]; then
   echo "::error::Probe script was not found: $probe_script"
@@ -122,6 +123,7 @@ docker_args=(
   --env CI=true
   --env TMPDIR=/tmp
   --env SANDBOX_COMMAND="$command"
+  --env "GHA_SANDBOX_DISABLE_CHECKS=$disable_checks"
   --volume "$workspace:/workspace:ro"
   --volume "$repo_dir/scripts:/probe-scripts:ro"
   --workdir /tmp

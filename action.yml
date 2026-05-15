@@ -31,6 +31,10 @@ inputs:
     description: Newline, comma, or space separated variable names inherited from the caller environment. Use auto for the curated non-sensitive default set, or none to disable it.
     required: false
     default: auto
+  disable-checks:
+    description: Comma, space, or newline separated probe checks to disable after explicit risk acceptance.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -45,4 +49,5 @@ runs:
         INPUT_NETWORK: ${{ inputs.network }}
         INPUT_ENV: ${{ inputs.env }}
         INPUT_INHERIT_ENV: ${{ inputs.inherit-env }}
+        INPUT_DISABLE_CHECKS: ${{ inputs.disable-checks }}
       run: '"$GITHUB_ACTION_PATH/actions/docker-sandbox/run.sh"'

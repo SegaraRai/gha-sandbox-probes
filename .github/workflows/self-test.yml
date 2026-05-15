@@ -61,12 +61,34 @@ jobs:
             ubuntu:24.04 \
             bash /probe-scripts/gha-sandbox-probe.sh
 
+      - name: Allows disabling capability check by risk acceptance
+        run: |
+          docker run --rm \
+            --env GHA_SANDBOX_DISABLE_CHECKS=zero-capabilities \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
       - name: Fails when Docker socket is visible
         run: |
           tests/expect-failure.sh docker run --rm \
             --user 1001 \
             --cap-drop=ALL \
             --security-opt no-new-privileges \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Cannot disable container runtime socket check
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --env GHA_SANDBOX_DISABLE_CHECKS=all-risk-accepted \
             --volume "$PWD/scripts:/probe-scripts:ro" \
             --volume "$PWD:/workspace:ro" \
             --volume /var/run/docker.sock:/var/run/docker.sock \
@@ -109,6 +131,22 @@ jobs:
             ubuntu:24.04 \
             bash /probe-scripts/gha-sandbox-probe.sh
 
+      - name: Allows disabling environment check by risk acceptance
+        run: |
+          docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --network none \
+            --env ACTIONS_RUNTIME_TOKEN=dummy \
+            --env REGISTRY_URL=https://user:password@example.com \
+            --env GHA_SANDBOX_DISABLE_CHECKS=environment \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
       - name: Allows explicitly accepted environment risk
         run: |
           docker run --rm \
@@ -142,6 +180,32 @@ jobs:
             --cap-drop=ALL \
             --security-opt no-new-privileges \
             --env HOME=/tmp/home \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            --volume "$tmp_home:/tmp/home:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Allows disabling credential file check by risk acceptance
+        run: |
+          tmp_home="$(mktemp -d)"
+          trap 'rm -rf "$tmp_home"' EXIT
+          mkdir -p "$tmp_home/.aws"
+          cat > "$tmp_home/.aws/credentials" <<'EOF'
+          [default]
+          aws_access_key_id=AKIAEXAMPLE
+          aws_secret_access_key=secret
+          EOF
+          chmod -R a+rX "$tmp_home"
+
+          docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --network none \
+            --env HOME=/tmp/home \
+            --env GHA_SANDBOX_DISABLE_CHECKS=credential-files \
             --volume "$PWD/scripts:/probe-scripts:ro" \
             --volume "$PWD:/workspace:ro" \
             --volume "$tmp_home:/tmp/home:ro" \

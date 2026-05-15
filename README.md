@@ -77,6 +77,50 @@ bash ./scripts/gha-sandbox-probe.sh
 | `network`     | no       | `bridge`                  | Docker network mode. Use `none` only when the command needs no network.                                                                                                                           |
 | `env`         | no       |                           | Newline-separated `KEY=value` entries passed to the sandbox command.                                                                                                                              |
 | `inherit-env` | no       | `auto`                    | Newline, comma, or space separated variable names inherited from the caller environment. Include `auto` to use the curated non-sensitive default set, or `none` to disable automatic inheritance. |
+| `disable-checks` | no | | Comma, space, or newline separated probe checks to disable after explicit risk acceptance. |
+
+## Check Policy
+
+The default policy is secure by default. Checks that validate the core sandbox
+boundary are always on:
+
+- `linux-proc`: `/proc` must be available so the probe can inspect the process
+  boundary.
+- `container-runtime-sockets`: Docker, containerd, Podman, CRI-O, BuildKit, and
+  `DOCKER_HOST` must not expose host container control.
+- `runner-processes`: host GitHub Actions runner processes, their environment
+  files, and their memory files must not be visible through `/proc`.
+
+The following checks may be disabled only when the workflow owner explicitly
+accepts the risk:
+
+| Check | Why it matters | Disable token |
+| --- | --- | --- |
+| Container marker | Confirms the command is running in a container-like boundary. Disable only for standalone probe tests outside containers. | `container-marker` |
+| Zero Linux capabilities | Capabilities increase the impact of sandbox escape attempts and kernel-facing attacks. | `zero-capabilities` |
+| Environment secrets | Detects Actions runtime/cache/OIDC/file-command variables, token-like names, and URL userinfo credentials. Prefer `env`/`inherit-env` or `GHA_SANDBOX_ALLOWED_ENV_NAMES` for specific accepted names. | `environment` |
+| Credential files | Detects common cloud, Kubernetes, registry, package-manager, GitHub CLI, Vault, and SSH credential files. | `credential-files` |
+| Cloud metadata credentials | Detects reachable AWS, Azure, and Google Cloud metadata token endpoints. Use provider-specific tokens when possible. | `cloud-metadata`, `cloud-metadata-aws`, `cloud-metadata-azure`, `cloud-metadata-gcp` |
+| Read-only paths | Verifies paths such as `/workspace` are not writable. | `readonly-paths` |
+
+You can disable accepted-risk checks from the action:
+
+```yaml
+with:
+  disable-checks: |
+    cloud-metadata-aws
+    credential-files
+```
+
+For standalone script use:
+
+```bash
+GHA_SANDBOX_DISABLE_CHECKS="cloud-metadata-aws credential-files" \
+  bash ./scripts/gha-sandbox-probe.sh
+```
+
+`all-risk-accepted` disables every accepted-risk check, but it does not disable
+the always-on sandbox boundary checks.
 
 ## Environment Inheritance
 
@@ -129,6 +173,8 @@ changes reviewable in the consuming repository.
 
 The script supports these optional environment variables:
 
+- `GHA_SANDBOX_DISABLE_CHECKS`: comma or whitespace separated accepted-risk
+  checks to disable. Supports `all-risk-accepted`.
 - `GHA_SANDBOX_REQUIRE_CONTAINER`: defaults to `1`.
 - `GHA_SANDBOX_REQUIRE_ZERO_CAPS`: defaults to `1`.
 - `GHA_SANDBOX_CHECK_METADATA`: defaults to `1`.
