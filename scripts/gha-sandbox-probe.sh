@@ -74,55 +74,16 @@ has_url_credentials() {
   [[ "$1" =~ ://[^/@]+@ ]]
 }
 
-normalize_check_name() {
-  local name="${1,,}"
-  name="${name//_/-}"
-
-  case "$name" in
-    container | require-container)
-      printf 'container-marker'
-      ;;
-    cap | caps | capability | capabilities | zero-caps | require-zero-caps)
-      printf 'zero-capabilities'
-      ;;
-    env | environment | environment-variables)
-      printf 'environment'
-      ;;
-    credentials | credential-files)
-      printf 'credential-files'
-      ;;
-    metadata | cloud-metadata)
-      printf 'cloud-metadata'
-      ;;
-    aws-metadata | metadata-aws)
-      printf 'cloud-metadata-aws'
-      ;;
-    azure-metadata | metadata-azure)
-      printf 'cloud-metadata-azure'
-      ;;
-    gcp-metadata | google-metadata | metadata-gcp | metadata-google)
-      printf 'cloud-metadata-gcp'
-      ;;
-    readonly | read-only | readonly-path | readonly-paths | read-only-paths)
-      printf 'readonly-paths'
-      ;;
-    *)
-      printf '%s' "$name"
-      ;;
-  esac
-}
-
 is_check_disabled() {
-  local expected disabled_check disabled_checks normalized
-  expected="$(normalize_check_name "$1")"
+  local expected disabled_check disabled_checks
+  expected="$1"
   disabled_checks="${GHA_SANDBOX_DISABLE_CHECKS:-}"
   disabled_checks="${disabled_checks//,/ }"
 
   for disabled_check in $disabled_checks; do
     [ -n "$disabled_check" ] || continue
-    normalized="$(normalize_check_name "$disabled_check")"
 
-    case "$normalized:$expected" in
+    case "$disabled_check:$expected" in
       all-risk-accepted:* | \
       "$expected:$expected" | \
       cloud-metadata:cloud-metadata-aws | \
@@ -136,12 +97,39 @@ is_check_disabled() {
   return 1
 }
 
+validate_disabled_checks() {
+  local disabled_check disabled_checks
+  disabled_checks="${GHA_SANDBOX_DISABLE_CHECKS:-}"
+  disabled_checks="${disabled_checks//,/ }"
+
+  for disabled_check in $disabled_checks; do
+    [ -n "$disabled_check" ] || continue
+
+    case "$disabled_check" in
+      all-risk-accepted | \
+      container-marker | \
+      zero-capabilities | \
+      environment | \
+      credential-files | \
+      cloud-metadata | \
+      cloud-metadata-aws | \
+      cloud-metadata-azure | \
+      cloud-metadata-gcp | \
+      readonly-paths)
+        ;;
+      *)
+        error "Unknown sandbox probe check in GHA_SANDBOX_DISABLE_CHECKS: $disabled_check"
+        ;;
+    esac
+  done
+}
+
 run_risk_accepted_check() {
   local check_name="$1"
   shift
 
   if is_check_disabled "$check_name"; then
-    notice "Sandbox probe check disabled by explicit risk acceptance: $(normalize_check_name "$check_name")"
+    notice "Sandbox probe check disabled by explicit risk acceptance: $check_name"
     return
   fi
 
@@ -177,7 +165,7 @@ is_zero_hex() {
 
 require_linux_proc() {
   if [ ! -r /proc/self/status ]; then
-    error "Linux /proc is not available"
+    notice "Linux /proc self status is not readable; process and capability introspection may be unavailable"
   fi
 }
 
@@ -195,6 +183,12 @@ require_container_marker() {
 
 require_zero_capabilities() {
   local cap_eff
+
+  if [ ! -r /proc/self/status ]; then
+    error "Cannot verify zero Linux capabilities because /proc/self/status is not readable"
+    return
+  fi
+
   cap_eff="$(awk '/^CapEff:/ { print $2 }' /proc/self/status)"
 
   if ! is_zero_hex "$cap_eff"; then
@@ -307,6 +301,11 @@ deny_host_runner_process_visibility() {
     actions-runner
     runsvc.sh
   )
+
+  if [ ! -d /proc ]; then
+    notice "Linux /proc is not mounted; host runner process visibility check is not observable"
+    return
+  fi
 
   for cmdline in /proc/[0-9]*/cmdline; do
     [ -r "$cmdline" ] || continue
@@ -515,6 +514,8 @@ main() {
   if [ "${GHA_SANDBOX_CHECK_METADATA:-1}" = "0" ]; then
     GHA_SANDBOX_DISABLE_CHECKS="${GHA_SANDBOX_DISABLE_CHECKS:-} cloud-metadata"
   fi
+
+  validate_disabled_checks
 
   run_risk_accepted_check container-marker require_container_marker
   run_risk_accepted_check zero-capabilities require_zero_capabilities

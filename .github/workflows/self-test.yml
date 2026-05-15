@@ -35,6 +35,18 @@ jobs:
             INPUT_ENV=HOME=/tmp/other-home \
             actions/docker-sandbox/run.sh
 
+      - name: Refuses unknown disabled check names
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --env GHA_SANDBOX_DISABLE_CHECKS=linux-proc \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
   probe-script:
     name: Probe Script
     runs-on: ubuntu-latest
