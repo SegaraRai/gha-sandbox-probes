@@ -1,7 +1,6 @@
 # GitHub Actions Sandbox Probes
 
-`gha-sandbox-probes` provides small, auditable checks for GitHub Actions jobs that
-run untrusted code inside a sandbox.
+`gha-sandbox-probes` provides small, auditable checks for GitHub Actions jobs that run untrusted code inside a sandbox.
 
 The project has two entry points:
 
@@ -52,7 +51,9 @@ Pin the action to a full-length commit SHA.
       bash .github/scripts/run-compatibility.sh "$MATRIX_CASE"
 ```
 
-The action intentionally does not know how to install project dependencies. Run project-specific setup in `command`, or call a setup script that you own and pin by commit SHA. If setup needs outbound network, opt in with `network: bridge`.
+The action intentionally does not know how to install project dependencies.
+Run project-specific setup in `command`, or call a setup script that you own and pin by commit SHA.
+If setup needs outbound network, opt in with `network: bridge`.
 
 ## Use the Standalone Script
 
@@ -75,9 +76,8 @@ docker run --rm \
   bash /probe.sh
 ```
 
-Run the standalone script inside the sandbox being evaluated. Running it
-directly on a normal runner shell is expected to fail checks such as
-`container-marker` and `zero-capabilities`.
+Run the standalone script inside the sandbox being evaluated.
+Running it directly on a normal runner shell is expected to fail checks such as `container-marker` and `zero-capabilities`.
 
 For submodules or vendored copies:
 
@@ -87,48 +87,38 @@ bash ./scripts/gha-sandbox-probe.sh
 
 ## Action Inputs
 
-| Input            | Required | Default                   | Description                                                                                                                                                                                       |
-| ---------------- | -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `image`          | yes      |                           | Docker image used for the sandbox.                                                                                                                                                                |
-| `command`        | yes      |                           | Command to run after the probes pass.                                                                                                                                                             |
-| `workspace`      | no       | `${{ github.workspace }}` | Host path mounted read-only at `/workspace`.                                                                                                                                                      |
-| `user`           | no       | `1001`                    | Container user.                                                                                                                                                                                   |
-| `pids-limit`     | no       | `512`                     | Docker process limit.                                                                                                                                                                             |
-| `network`        | no       | `none`                    | Docker network mode. Use `bridge` only when the sandboxed command needs outbound network.                                                                                                          |
-| `env`            | no       |                           | Newline-separated `KEY=value` entries passed to the sandbox command.                                                                                                                              |
-| `unsafe-env`     | no       |                           | Newline-separated `KEY=value` entries for sensitive CI environment variables that are intentionally exposed to the sandbox command.                                                                |
-| `inherit-env`    | no       | `auto`                    | Newline, comma, or space separated variable names inherited from the caller environment. Include `auto` to use the curated non-sensitive default set, or `none` to disable automatic inheritance. |
-| `unsafe-inherit-env` | no | | Newline, comma, or space separated sensitive CI environment variable names intentionally inherited into the sandbox command. |
-| `disable-checks` | no       |                           | Comma, space, or newline separated probe checks to disable after explicit risk acceptance.                                                                                                        |
+| Input                | Required | Default                   | Description                                                                                                                                                                                       |
+| -------------------- | -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `image`              | yes      |                           | Docker image used for the sandbox.                                                                                                                                                                |
+| `command`            | yes      |                           | Command to run after the probes pass.                                                                                                                                                             |
+| `workspace`          | no       | `${{ github.workspace }}` | Host path mounted read-only at `/workspace`.                                                                                                                                                      |
+| `user`               | no       | `1001`                    | Container user.                                                                                                                                                                                   |
+| `pids-limit`         | no       | `512`                     | Docker process limit.                                                                                                                                                                             |
+| `network`            | no       | `none`                    | Docker network mode. Use `bridge` only when the sandboxed command needs outbound network.                                                                                                         |
+| `env`                | no       |                           | Newline-separated `KEY=value` entries passed to the sandbox command.                                                                                                                              |
+| `unsafe-env`         | no       |                           | Newline-separated `KEY=value` entries for sensitive CI environment variables that are intentionally exposed to the sandbox command.                                                               |
+| `inherit-env`        | no       | `auto`                    | Newline, comma, or space separated variable names inherited from the caller environment. Include `auto` to use the curated non-sensitive default set, or `none` to disable automatic inheritance. |
+| `unsafe-inherit-env` | no       |                           | Newline, comma, or space separated sensitive CI environment variable names intentionally inherited into the sandbox command.                                                                      |
+| `disable-checks`     | no       |                           | Comma, space, or newline separated probe checks to disable after explicit risk acceptance.                                                                                                        |
 
 ## Container Image Requirements
 
-The sandbox image must provide `bash`, `awk`, `env`, `grep`, `head`, `mkdir`,
-`tar`, and `tr`. The action overrides the image entrypoint with `bash`, so the
-image entrypoint cannot run before the probes. Minimal images such as
-distroless images, Alpine without Bash, or slim images missing these utilities
-will fail before the sandboxed command runs.
+The sandbox image must provide `bash`, `awk`, `env`, `grep`, `head`, `mkdir`, `tar`, and `tr`.
+The action overrides the image entrypoint with `bash`, so the image entrypoint cannot run before the probes.
+Minimal images such as distroless images, Alpine without Bash, or slim images missing these utilities will fail before the sandboxed command runs.
 
-The workspace is mounted read-only at `/workspace`, then copied to
-`/tmp/workspace` without `.git`. The sandboxed command runs from
-`/tmp/workspace`; changes made there do not persist to later workflow steps.
-This avoids exposing checkout credentials that may exist in Git metadata, but
-large repositories pay the cost of copying the workspace.
+The workspace is mounted read-only at `/workspace`, then copied to `/tmp/workspace` without `.git`.
+The sandboxed command runs from `/tmp/workspace`; changes made there do not persist to later workflow steps.
+This avoids exposing checkout credentials that may exist in Git metadata, but large repositories pay the cost of copying the workspace.
 
 ## Check Policy
 
-The default policy is secure by default. Checks that validate the core sandbox
-boundary are always on:
+The default policy is secure by default. Checks that validate the core sandbox boundary are always on:
 
-- `container-runtime-sockets`: Docker, containerd, Podman, CRI-O, BuildKit, and
-  `DOCKER_HOST` must not expose host container control.
-- `runner-processes`: if `/proc` is mounted, host GitHub Actions runner
-  processes, their environment files, and their memory files must not be
-  visible. A missing or restricted `/proc` is treated as non-observable rather
-  than unsafe.
+- `container-runtime-sockets`: Docker, containerd, Podman, CRI-O, BuildKit, and `DOCKER_HOST` must not expose host container control.
+- `runner-processes`: if `/proc` is mounted, host GitHub Actions runner processes, their environment files, and their memory files must not be visible. A missing or restricted `/proc` is treated as non-observable rather than unsafe.
 
-The following checks may be disabled only when the workflow owner explicitly
-accepts the risk:
+The following checks may be disabled only when the workflow owner explicitly accepts the risk:
 
 | Check                      | Why it matters                                                                                                                                                                                        | Disable token                                                                        |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -169,46 +159,33 @@ By default, the action inherits a small allowlist of non-sensitive environment v
 
 This list is based on public tool documentation for GitHub Actions default variables, the `NO_COLOR` convention, Node.js color environment variables, Cargo terminal color, CMake color controls, pytest/Python color controls, and Go module privacy notes.
 
-Package registry, proxy, cloud, and private module environment variables are not inherited by default because they often contain credentials or private package names. Pass values explicitly with `env`, or inherit specific names with `inherit-env`, when you understand and accept the risk of exposing them to the sandboxed command.
+Package registry, proxy, cloud, and private module environment variables are not inherited by default because they often contain credentials or private package names.
+Pass values explicitly with `env`, or inherit specific names with `inherit-env`, when you understand and accept the risk of exposing them to the sandboxed command.
 
-GitHub Actions runtime, cache, OIDC, file-command, package-token, SSH-agent,
-and similar CI credential variables are blocked from normal `env` and
-`inherit-env`. To expose one anyway, use `unsafe-env` or `unsafe-inherit-env`;
-these inputs are intentionally verbose because the sandboxed command can read
-and exfiltrate those values.
+GitHub Actions runtime, cache, OIDC, file-command, package-token, SSH-agent, and similar CI credential variables are blocked from normal `env` and `inherit-env`.
+To expose one anyway, use `unsafe-env` or `unsafe-inherit-env`; these inputs are intentionally verbose because the sandboxed command can read and exfiltrate those values.
 
-Explicitly passed or inherited environment variable names are registered in `GHA_SANDBOX_ALLOWED_ENV_NAMES` before the probe runs. The probe excludes those names from environment variable name and URL-userinfo checks, but it still checks structural sandbox boundaries such as runner process visibility, container runtime sockets, credential files, metadata token endpoints, capabilities, and writable mounts.
+Explicitly passed or inherited environment variable names are registered in `GHA_SANDBOX_ALLOWED_ENV_NAMES` before the probe runs.
+The probe excludes those names from environment variable name and URL-userinfo checks, but it still checks structural sandbox boundaries such as runner process visibility, container runtime sockets, credential files, metadata token endpoints, capabilities, and writable mounts.
 
 `HOME` is always managed by the sandbox. `PATH` can be set explicitly with `env`, but it cannot be inherited from the host environment.
 
 ## Normal Runner Hardening
 
-A normal GitHub Actions job without an inner sandbox is not equivalent to this
-isolation model. Once untrusted code runs in a job, it can generally share that
-job's filesystem, network, process view, environment, checked-out files, caches,
-and available credentials. GitHub-hosted runners reduce cross-job persistence by
-providing fresh job environments, but they do not isolate steps within the same
-job.
+A normal GitHub Actions job without an inner sandbox is not equivalent to this isolation model.
+Once untrusted code runs in a job, it can generally share that job's filesystem, network, process view, environment, checked-out files, caches, and available credentials.
+GitHub-hosted runners reduce cross-job persistence by providing fresh job environments, but they do not isolate steps within the same job.
 
 For jobs that cannot use this sandbox, reduce blast radius instead:
 
-- Keep untrusted code out of `pull_request_target` and `workflow_run` jobs with
-  secrets, write tokens, OIDC, or privileged cache access. GitHub warns that
-  running untrusted code in those contexts can lead to cache poisoning and
-  unintended access to secrets or write privileges.
+- Keep untrusted code out of `pull_request_target` and `workflow_run` jobs with secrets, write tokens, OIDC, or privileged cache access. GitHub warns that running untrusted code in those contexts can lead to cache poisoning and unintended access to secrets or write privileges.
 - Use top-level `permissions: {}` or least-privilege per-job permissions.
-- Use `actions/checkout` with `persist-credentials: false` unless the job needs
-  authenticated Git operations.
-- Grant `id-token: write` only in the exact publish/deploy job that needs OIDC,
-  and constrain cloud or registry trust policies by repository, ref, workflow,
-  environment, and audience.
-- Do not restore caches written by untrusted jobs into privileged publish or
-  deploy jobs. Treat cache contents as untrusted inputs.
-- Prefer deny-by-default egress controls and block cloud metadata endpoints,
-  especially on self-hosted or cloud-hosted runners.
+- Use `actions/checkout` with `persist-credentials: false` unless the job needs authenticated Git operations.
+- Grant `id-token: write` only in the exact publish/deploy job that needs OIDC, and constrain cloud or registry trust policies by repository, ref, workflow, environment, and audience.
+- Do not restore caches written by untrusted jobs into privileged publish or deploy jobs. Treat cache contents as untrusted inputs.
+- Prefer deny-by-default egress controls and block cloud metadata endpoints, especially on self-hosted or cloud-hosted runners.
 
-These controls are useful, but they reduce exposure rather than proving that
-arbitrary code cannot reach runner memory, job credentials, or shared job state.
+These controls are useful, but they reduce exposure rather than proving that arbitrary code cannot reach runner memory, job credentials, or shared job state.
 
 ## Project Setup
 
@@ -238,28 +215,25 @@ with:
     vp run test:compat --case "$MATRIX_CASE"
 ```
 
-This keeps project policy out of the generic sandbox action and makes setup
-changes reviewable in the consuming repository.
+This keeps project policy out of the generic sandbox action and makes setup changes reviewable in the consuming repository.
 
 ## Standalone Script Environment
 
 The script supports these optional environment variables:
 
-- `GHA_SANDBOX_DISABLE_CHECKS`: comma or whitespace separated accepted-risk
-  checks to disable. Supports `all-risk-accepted`.
+- `GHA_SANDBOX_DISABLE_CHECKS`: comma or whitespace separated accepted-risk checks to disable. Supports `all-risk-accepted`.
 - `GHA_SANDBOX_REQUIRE_CONTAINER`: defaults to `1`.
 - `GHA_SANDBOX_REQUIRE_ZERO_CAPS`: defaults to `1`.
 - `GHA_SANDBOX_CHECK_METADATA`: defaults to `1`.
 - `GHA_SANDBOX_READONLY_PATHS`: defaults to `/workspace`.
 - `GHA_SANDBOX_ALLOWED_ENV_NAMES`: optional comma or whitespace separated list of environment variable names that should be treated as explicitly risk-accepted by the environment probe.
 
-Set a variable to `0` only for focused tests. Production use should keep the
-defaults.
+Set a variable to `0` only for focused tests. Production use should keep the defaults.
 
 ## Development
 
-Run the self-test workflow in GitHub Actions. It verifies both successful and
-intentionally unsafe Docker configurations.
+Run the self-test workflow in GitHub Actions.
+It verifies both successful and intentionally unsafe Docker configurations.
 
 Local syntax checks:
 
