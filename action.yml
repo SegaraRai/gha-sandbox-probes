@@ -1,0 +1,48 @@
+name: GitHub Actions Sandbox Probes
+description: Run sandbox escape probes and then execute a command in a hardened Docker container.
+inputs:
+  image:
+    description: Docker image used for the sandbox.
+    required: true
+  command:
+    description: Command to run after the probes pass.
+    required: true
+  workspace:
+    description: Host path mounted read-only at /workspace.
+    required: false
+    default: ""
+  user:
+    description: Container user.
+    required: false
+    default: "1001"
+  pids-limit:
+    description: Docker process limit.
+    required: false
+    default: "512"
+  network:
+    description: Docker network mode.
+    required: false
+    default: bridge
+  setup:
+    description: Optional setup mode. Supported values are none and vite-plus.
+    required: false
+    default: none
+  env:
+    description: Newline-separated KEY=value entries passed to the sandbox command.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Run sandbox probes
+      shell: bash
+      env:
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_WORKSPACE: ${{ inputs.workspace }}
+        INPUT_USER: ${{ inputs.user }}
+        INPUT_PIDS_LIMIT: ${{ inputs.pids-limit }}
+        INPUT_NETWORK: ${{ inputs.network }}
+        INPUT_SETUP: ${{ inputs.setup }}
+        INPUT_ENV: ${{ inputs.env }}
+      run: '"$GITHUB_ACTION_PATH/actions/docker-sandbox/run.sh"'

@@ -1,0 +1,107 @@
+name: Self Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  shell-syntax:
+    name: Shell Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check shell syntax
+        run: |
+          bash -n scripts/gha-sandbox-probe.sh
+          bash -n actions/docker-sandbox/run.sh
+          bash -n tests/expect-failure.sh
+
+  probe-script:
+    name: Probe Script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Passes in a hardened container
+        run: |
+          docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Fails when capabilities are present
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Fails when Docker socket is visible
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Fails when Actions runtime credentials are visible
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --env ACTIONS_RUNTIME_TOKEN=dummy \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Fails when host PID namespace is visible
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --pid=host \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Fails when workspace is writable
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:rw" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+  action:
+    name: Composite Action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run local action
+        uses: ./
+        with:
+          image: ubuntu:24.04
+          command: test -f README.md && test -f LICENSE
