@@ -28,13 +28,9 @@ inputs:
     required: false
     default: ""
   inherit-env:
-    description: Newline, comma, or space separated variable names inherited from the caller environment.
+    description: Newline, comma, or space separated variable names inherited from the caller environment. Use auto for the curated non-sensitive default set.
     required: false
-    default: ""
-  force-color:
-    description: Set color-related environment variables for the sandbox command.
-    required: false
-    default: "true"
+    default: auto
 runs:
   using: composite
   steps:
@@ -49,5 +45,4 @@ runs:
         INPUT_NETWORK: ${{ inputs.network }}
         INPUT_ENV: ${{ inputs.env }}
         INPUT_INHERIT_ENV: ${{ inputs.inherit-env }}
-        INPUT_FORCE_COLOR: ${{ inputs.force-color }}
       run: '"$GITHUB_ACTION_PATH/run.sh"'

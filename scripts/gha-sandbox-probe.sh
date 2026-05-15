@@ -100,8 +100,14 @@ deny_actions_runtime_credentials() {
     GITHUB_STATE
     GITHUB_STEP_SUMMARY
     GITHUB_TOKEN
+    GIT_ASKPASS
+    NETRC
     NODE_AUTH_TOKEN
+    NPM_CONFIG_USERCONFIG
     NPM_TOKEN
+    PIP_CONFIG_FILE
+    SSH_AGENT_PID
+    SSH_AUTH_SOCK
   )
 
   for key in "${keys[@]}"; do
@@ -110,6 +116,23 @@ deny_actions_runtime_credentials() {
       error "Sensitive CI credential environment variable is visible: $key"
     fi
   done
+
+  while IFS='=' read -r key _; do
+    case "${key^^}" in
+      *TOKEN* | \
+      *SECRET* | \
+      *PASSWORD* | \
+      *PASSWD* | \
+      *PRIVATE_KEY* | \
+      *ACCESS_KEY* | \
+      *API_KEY* | \
+      *CREDENTIAL* | \
+      *COOKIE* | \
+      *SESSION*)
+        error "Potentially sensitive environment variable is visible: $key"
+        ;;
+    esac
+  done < <(env)
 }
 
 deny_host_runner_process_visibility() {

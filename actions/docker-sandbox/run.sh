@@ -12,8 +12,7 @@ user="${INPUT_USER:-1001}"
 pids_limit="${INPUT_PIDS_LIMIT:-512}"
 network="${INPUT_NETWORK:-bridge}"
 env_block="${INPUT_ENV:-}"
-inherit_env_block="${INPUT_INHERIT_ENV:-}"
-force_color="${INPUT_FORCE_COLOR:-true}"
+inherit_env_block="${INPUT_INHERIT_ENV:-auto}"
 
 if [ ! -f "$probe_script" ]; then
   echo "::error::Probe script was not found: $probe_script"
@@ -35,7 +34,9 @@ case "$network" in
 esac
 
 is_blocked_env_name() {
-  case "$1" in
+  local name="${1^^}"
+
+  case "$name" in
     ACTIONS_CACHE_SERVICE_V2 | \
     ACTIONS_CACHE_URL | \
     ACTIONS_ID_TOKEN_REQUEST_TOKEN | \
@@ -50,8 +51,26 @@ is_blocked_env_name() {
     GITHUB_STATE | \
     GITHUB_STEP_SUMMARY | \
     GITHUB_TOKEN | \
+    GIT_ASKPASS | \
+    NETRC | \
     NODE_AUTH_TOKEN | \
-    NPM_TOKEN)
+    NPM_CONFIG_USERCONFIG | \
+    NPM_TOKEN | \
+    PIP_CONFIG_FILE | \
+    SSH_AGENT_PID | \
+    SSH_AUTH_SOCK)
+      return 0
+      ;;
+    *TOKEN* | \
+    *SECRET* | \
+    *PASSWORD* | \
+    *PASSWD* | \
+    *PRIVATE_KEY* | \
+    *ACCESS_KEY* | \
+    *API_KEY* | \
+    *CREDENTIAL* | \
+    *COOKIE* | \
+    *SESSION*)
       return 0
       ;;
     *)
@@ -71,6 +90,11 @@ append_env_entry() {
 
   if is_blocked_env_name "$name"; then
     echo "::error::Refusing to pass sensitive CI environment variable: $name"
+    exit 1
+  fi
+
+  if [[ "${entry#*=}" =~ ://[^/@]+@ ]]; then
+    echo "::error::Refusing to pass environment variable containing URL credentials: $name"
     exit 1
   fi
 
@@ -109,6 +133,44 @@ append_inherited_env_name() {
   docker_args+=(--env "$name")
 }
 
+append_auto_env_names() {
+  local safe_auto_env_names=(
+    TERM
+    COLORTERM
+    NO_COLOR
+    FORCE_COLOR
+    CLICOLOR
+    CLICOLOR_FORCE
+    CARGO_TERM_COLOR
+    CMAKE_COLOR_DIAGNOSTICS
+    PY_COLORS
+    PYTHON_COLORS
+    LANG
+    LANGUAGE
+    LC_ALL
+    LC_CTYPE
+    LC_MESSAGES
+    LC_COLLATE
+    LC_NUMERIC
+    LC_TIME
+    LC_MONETARY
+    LC_PAPER
+    LC_NAME
+    LC_ADDRESS
+    LC_TELEPHONE
+    LC_MEASUREMENT
+    LC_IDENTIFICATION
+    TZ
+    SOURCE_DATE_EPOCH
+  )
+
+  local name
+  for name in "${safe_auto_env_names[@]}"; do
+    [ -n "${!name-}" ] || continue
+    append_inherited_env_name "$name"
+  done
+}
+
 docker_args=(
   run
   --rm
@@ -127,13 +189,7 @@ docker_args=(
 )
 
 allowed_env_names=(CI TMPDIR)
-
-if [ "$force_color" = "true" ]; then
-  append_env_entry "TERM=${TERM:-xterm-256color}"
-  append_env_entry "COLORTERM=${COLORTERM:-truecolor}"
-  append_env_entry "FORCE_COLOR=${FORCE_COLOR:-1}"
-  append_env_entry "CLICOLOR_FORCE=${CLICOLOR_FORCE:-1}"
-fi
+inherit_auto_env=1
 
 while IFS= read -r line; do
   [ -n "$line" ] || continue
@@ -155,9 +211,22 @@ while IFS= read -r line; do
   esac
 
   for name in ${line//,/ }; do
-    append_inherited_env_name "$name"
+    case "${name,,}" in
+      auto)
+        inherit_auto_env=1
+        ;;
+      none)
+        ;;
+      *)
+        append_inherited_env_name "$name"
+        ;;
+    esac
   done
 done <<< "$inherit_env_block"
+
+if [ "${inherit_auto_env:-0}" = "1" ]; then
+  append_auto_env_names
+fi
 
 allowed_env_names_csv="$(IFS=,; echo "${allowed_env_names[*]}")"
 docker_args+=(--env "SANDBOX_ALLOWED_ENV_NAMES=$allowed_env_names_csv")

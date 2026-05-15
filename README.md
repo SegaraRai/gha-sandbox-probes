@@ -82,8 +82,30 @@ bash ./scripts/gha-sandbox-probe.sh
 | `pids-limit` | no | `512` | Docker process limit. |
 | `network` | no | `bridge` | Docker network mode. Use `none` only when the command needs no network. |
 | `env` | no | | Newline-separated `KEY=value` entries passed to the sandbox command. |
-| `inherit-env` | no | | Newline, comma, or space separated variable names inherited from the caller environment. |
-| `force-color` | no | `true` | Sets `TERM`, `COLORTERM`, `FORCE_COLOR`, and `CLICOLOR_FORCE` for tools that disable color in non-TTY CI output. |
+| `inherit-env` | no | `auto` | Newline, comma, or space separated variable names inherited from the caller environment. Include `auto` to use the curated non-sensitive default set, or `none` to disable automatic inheritance. |
+
+## Environment Inheritance
+
+By default, the action inherits a small allowlist of non-sensitive environment
+variables that preserve terminal behavior, locale, timezone, and reproducible
+build settings:
+
+- Color and terminal: `TERM`, `COLORTERM`, `NO_COLOR`, `FORCE_COLOR`,
+  `CLICOLOR`, `CLICOLOR_FORCE`
+- Tool-specific color controls: `CARGO_TERM_COLOR`,
+  `CMAKE_COLOR_DIAGNOSTICS`, `PY_COLORS`, `PYTHON_COLORS`
+- Locale and timezone: `LANG`, `LANGUAGE`, `LC_*`, `TZ`
+- Reproducibility: `SOURCE_DATE_EPOCH`
+
+This list is based on public tool documentation for GitHub Actions default
+variables, the `NO_COLOR` convention, Node.js color environment variables,
+Cargo terminal color, CMake color controls, pytest/Python color controls, and
+Go module privacy notes.
+
+Package registry, proxy, cloud, and private module environment variables are
+not inherited by default because they often contain credentials or private
+package names. Pass non-sensitive values explicitly with `env`, or inherit
+specific names with `inherit-env`.
 
 The action refuses to pass known sensitive GitHub Actions variables such as
 `ACTIONS_RUNTIME_TOKEN`, `ACTIONS_CACHE_URL`, `ACTIONS_RESULTS_URL`,
@@ -91,6 +113,8 @@ The action refuses to pass known sensitive GitHub Actions variables such as
 as `GITHUB_ENV` and `GITHUB_OUTPUT`, and package publishing tokens.
 `HOME` is always managed by the sandbox. `PATH` can be set explicitly with
 `env`, but it cannot be inherited from the host environment.
+Environment values that contain URL credentials, such as
+`https://user:password@example.com`, are rejected.
 
 ## Project Setup
 
