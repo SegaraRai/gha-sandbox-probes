@@ -22,10 +22,17 @@ code, such as compatibility tests against third-party dependency graphs.
 The checks focus on detecting:
 
 - GitHub Actions runtime, cache, results, and OIDC credentials in the sandbox.
-- Docker daemon access through `/var/run/docker.sock`, `/run/docker.sock`, or
-  `DOCKER_HOST`.
+- Container runtime access through Docker, containerd, Podman, CRI-O, or
+  BuildKit sockets, plus `DOCKER_HOST`.
 - Effective Linux capabilities inside the sandbox.
-- Visibility of host GitHub Actions runner processes through `/proc`.
+- Visibility of host GitHub Actions runner processes through `/proc`, including
+  readable runner environment or memory files.
+- Credential-bearing files commonly targeted by supply-chain malware, including
+  Kubernetes service account tokens, cloud credentials, registry credentials,
+  package-manager credentials, GitHub CLI hosts, Vault tokens, and SSH keys.
+- Reachable cloud metadata credential endpoints for AWS, Azure, and Google
+  Cloud.
+- Environment variables that expose sensitive names or URL userinfo credentials.
 - Writable workspace mounts when a read-only workspace is expected.
 
 The probes are not a complete sandbox. They are runtime assertions that help
@@ -153,6 +160,7 @@ The script supports these optional environment variables:
 
 - `GHA_SANDBOX_REQUIRE_CONTAINER`: defaults to `1`.
 - `GHA_SANDBOX_REQUIRE_ZERO_CAPS`: defaults to `1`.
+- `GHA_SANDBOX_CHECK_METADATA`: defaults to `1`.
 - `GHA_SANDBOX_READONLY_PATHS`: defaults to `/workspace`.
 
 Set a variable to `0` only for focused tests. Production use should keep the

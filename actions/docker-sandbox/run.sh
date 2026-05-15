@@ -61,16 +61,22 @@ is_blocked_env_name() {
     SSH_AUTH_SOCK)
       return 0
       ;;
-    *TOKEN* | \
+    TOKEN | \
+    TOKEN_* | \
+    *_TOKEN | \
+    *_TOKEN_* | \
+    *AUTH_TOKEN* | \
     *SECRET* | \
     *PASSWORD* | \
     *PASSWD* | \
+    *_PASS | \
     *PRIVATE_KEY* | \
     *ACCESS_KEY* | \
     *API_KEY* | \
     *CREDENTIAL* | \
     *COOKIE* | \
-    *SESSION*)
+    *_SESSION_TOKEN | \
+    *_SESSION_COOKIE)
       return 0
       ;;
     *)
@@ -216,6 +222,7 @@ while IFS= read -r line; do
         inherit_auto_env=1
         ;;
       none)
+        inherit_auto_env=0
         ;;
       *)
         append_inherited_env_name "$name"

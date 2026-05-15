@@ -41,6 +41,12 @@ jobs:
             INPUT_INHERIT_ENV=PATH \
             actions/docker-sandbox/run.sh
 
+          tests/expect-failure.sh env \
+            INPUT_IMAGE=ubuntu:24.04 \
+            INPUT_COMMAND=true \
+            INPUT_ENV=REGISTRY_URL=https://user:password@example.com \
+            actions/docker-sandbox/run.sh
+
   probe-script:
     name: Probe Script
     runs-on: ubuntu-latest
@@ -79,6 +85,18 @@ jobs:
             ubuntu:24.04 \
             bash /probe-scripts/gha-sandbox-probe.sh
 
+      - name: Fails when container runtime socket is visible
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            --volume /var/run/docker.sock:/run/containerd/containerd.sock \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
       - name: Fails when Actions runtime credentials are visible
         run: |
           tests/expect-failure.sh docker run --rm \
@@ -88,6 +106,58 @@ jobs:
             --env ACTIONS_RUNTIME_TOKEN=dummy \
             --volume "$PWD/scripts:/probe-scripts:ro" \
             --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Fails when URL credentials are visible
+        run: |
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --env REGISTRY_URL=https://user:password@example.com \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Fails when cloud credential files are visible
+        run: |
+          tmp_home="$(mktemp -d)"
+          trap 'rm -rf "$tmp_home"' EXIT
+          mkdir -p "$tmp_home/.aws"
+          cat > "$tmp_home/.aws/credentials" <<'EOF'
+          [default]
+          aws_access_key_id=AKIAEXAMPLE
+          aws_secret_access_key=secret
+          EOF
+          chmod -R a+rX "$tmp_home"
+
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --env HOME=/tmp/home \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            --volume "$tmp_home:/tmp/home:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Fails when Kubernetes service account token is visible
+        run: |
+          tmp_service_account="$(mktemp -d)"
+          trap 'rm -rf "$tmp_service_account"' EXIT
+          printf 'token' > "$tmp_service_account/token"
+          chmod -R a+rX "$tmp_service_account"
+
+          tests/expect-failure.sh docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            --volume "$tmp_service_account:/var/run/secrets/kubernetes.io/serviceaccount:ro" \
             ubuntu:24.04 \
             bash /probe-scripts/gha-sandbox-probe.sh
 

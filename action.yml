@@ -28,7 +28,7 @@ inputs:
     required: false
     default: ""
   inherit-env:
-    description: Newline, comma, or space separated variable names inherited from the caller environment. Use auto for the curated non-sensitive default set.
+    description: Newline, comma, or space separated variable names inherited from the caller environment. Use auto for the curated non-sensitive default set, or none to disable it.
     required: false
     default: auto
 runs:
