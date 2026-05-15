@@ -26,7 +26,7 @@ Pin the action to a full-length commit SHA.
     persist-credentials: false
 
 - name: Run compatibility in hardened sandbox
-  uses: SegaraRai/gha-sandbox-probes@0123456789abcdef0123456789abcdef01234567
+  uses: SegaraRai/gha-sandbox-probes@b18908cf314a4aa26e4cb705d21a1c272c4fb877
   with:
     image: ubuntu:24.04
     workspace: .
@@ -51,7 +51,7 @@ Pin the raw URL to a full-length commit SHA and run the script inside the sandbo
 
 ```bash
 curl -fsSL \
-  https://raw.githubusercontent.com/SegaraRai/gha-sandbox-probes/0123456789abcdef0123456789abcdef01234567/scripts/gha-sandbox-probe.sh \
+  https://raw.githubusercontent.com/SegaraRai/gha-sandbox-probes/b18908cf314a4aa26e4cb705d21a1c272c4fb877/scripts/gha-sandbox-probe.sh \
   -o gha-sandbox-probe.sh
 
 docker run --rm \
