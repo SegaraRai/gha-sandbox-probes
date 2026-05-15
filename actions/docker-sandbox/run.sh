@@ -11,8 +11,9 @@ workspace="${INPUT_WORKSPACE:-${GITHUB_WORKSPACE:-$PWD}}"
 user="${INPUT_USER:-1001}"
 pids_limit="${INPUT_PIDS_LIMIT:-512}"
 network="${INPUT_NETWORK:-bridge}"
-setup="${INPUT_SETUP:-none}"
 env_block="${INPUT_ENV:-}"
+inherit_env_block="${INPUT_INHERIT_ENV:-}"
+force_color="${INPUT_FORCE_COLOR:-true}"
 
 if [ ! -f "$probe_script" ]; then
   echo "::error::Probe script was not found: $probe_script"
@@ -24,15 +25,6 @@ if [ ! -d "$workspace" ]; then
   exit 1
 fi
 
-case "$setup" in
-  none | vite-plus)
-    ;;
-  *)
-    echo "::error::Unsupported setup mode: $setup"
-    exit 1
-    ;;
-esac
-
 case "$network" in
   bridge | host | none)
     ;;
@@ -41,6 +33,81 @@ case "$network" in
     exit 1
     ;;
 esac
+
+is_blocked_env_name() {
+  case "$1" in
+    ACTIONS_CACHE_SERVICE_V2 | \
+    ACTIONS_CACHE_URL | \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN | \
+    ACTIONS_ID_TOKEN_REQUEST_URL | \
+    ACTIONS_RESULTS_URL | \
+    ACTIONS_RUNTIME_TOKEN | \
+    ACTIONS_RUNTIME_URL | \
+    GH_TOKEN | \
+    GITHUB_ENV | \
+    GITHUB_OUTPUT | \
+    GITHUB_PATH | \
+    GITHUB_STATE | \
+    GITHUB_STEP_SUMMARY | \
+    GITHUB_TOKEN | \
+    NODE_AUTH_TOKEN | \
+    NPM_TOKEN)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+append_env_entry() {
+  local entry="$1"
+  local name="${entry%%=*}"
+
+  if [[ ! "$entry" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+    echo "::error::Invalid environment entry: $entry"
+    exit 1
+  fi
+
+  if is_blocked_env_name "$name"; then
+    echo "::error::Refusing to pass sensitive CI environment variable: $name"
+    exit 1
+  fi
+
+  if [ "$name" = "HOME" ]; then
+    echo "::error::HOME is managed by the sandbox and cannot be overridden"
+    exit 1
+  fi
+
+  allowed_env_names+=("$name")
+  docker_args+=(--env "$entry")
+}
+
+append_inherited_env_name() {
+  local name="$1"
+
+  [ -n "$name" ] || return
+
+  if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "::error::Invalid inherited environment variable name: $name"
+    exit 1
+  fi
+
+  if is_blocked_env_name "$name"; then
+    echo "::error::Refusing to inherit sensitive CI environment variable: $name"
+    exit 1
+  fi
+
+  case "$name" in
+    HOME | PATH)
+      echo "::error::Refusing to inherit host-specific environment variable: $name"
+      exit 1
+      ;;
+  esac
+
+  allowed_env_names+=("$name")
+  docker_args+=(--env "$name")
+}
 
 docker_args=(
   run
@@ -54,13 +121,19 @@ docker_args=(
   --env CI=true
   --env TMPDIR=/tmp
   --env SANDBOX_COMMAND="$command"
-  --env SANDBOX_SETUP="$setup"
   --volume "$workspace:/workspace:ro"
   --volume "$repo_dir/scripts:/probe-scripts:ro"
   --workdir /tmp
 )
 
 allowed_env_names=(CI TMPDIR)
+
+if [ "$force_color" = "true" ]; then
+  append_env_entry "TERM=${TERM:-xterm-256color}"
+  append_env_entry "COLORTERM=${COLORTERM:-truecolor}"
+  append_env_entry "FORCE_COLOR=${FORCE_COLOR:-1}"
+  append_env_entry "CLICOLOR_FORCE=${CLICOLOR_FORCE:-1}"
+fi
 
 while IFS= read -r line; do
   [ -n "$line" ] || continue
@@ -70,14 +143,21 @@ while IFS= read -r line; do
       ;;
   esac
 
-  if [[ ! "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-    echo "::error::Invalid environment entry: $line"
-    exit 1
-  fi
-
-  allowed_env_names+=("${line%%=*}")
-  docker_args+=(--env "$line")
+  append_env_entry "$line"
 done <<< "$env_block"
+
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  case "$line" in
+    \#*)
+      continue
+      ;;
+  esac
+
+  for name in ${line//,/ }; do
+    append_inherited_env_name "$name"
+  done
+done <<< "$inherit_env_block"
 
 allowed_env_names_csv="$(IFS=,; echo "${allowed_env_names[*]}")"
 docker_args+=(--env "SANDBOX_ALLOWED_ENV_NAMES=$allowed_env_names_csv")
@@ -89,25 +169,11 @@ cd /tmp/workspace
 
 /probe-scripts/gha-sandbox-probe.sh
 
-case "$SANDBOX_SETUP" in
-  none)
-    ;;
-  vite-plus)
-    curl -fsSL --connect-timeout 5 --max-time 15 https://viteplus.dev/install.sh | bash
-    . "$HOME/.vite-plus/env"
-    vp env use "$(cat .node-version)"
-    vp install
-    ;;
-  *)
-    echo "::error::Unsupported setup mode: $SANDBOX_SETUP"
-    exit 1
-    ;;
-esac
-
 allowed_env=(
   HOME="$HOME"
   PATH="$PATH"
   LANG="${LANG:-C.UTF-8}"
+  LC_ALL="${LC_ALL:-C.UTF-8}"
   CI="${CI:-true}"
   TMPDIR="${TMPDIR:-/tmp}"
 )
@@ -117,7 +183,7 @@ for name in "${sandbox_allowed_names[@]}"; do
   case "$name" in
     '' | *[!A-Za-z0-9_]* | [0-9]*)
       ;;
-    HOME | LANG | PATH)
+    HOME)
       ;;
     *)
       value="${!name-}"

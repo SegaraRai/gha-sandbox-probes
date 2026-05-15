@@ -21,6 +21,26 @@ jobs:
           bash -n actions/docker-sandbox/run.sh
           bash -n tests/expect-failure.sh
 
+      - name: Refuses sensitive environment forwarding
+        run: |
+          tests/expect-failure.sh env \
+            INPUT_IMAGE=ubuntu:24.04 \
+            INPUT_COMMAND=true \
+            INPUT_INHERIT_ENV=GITHUB_ENV \
+            actions/docker-sandbox/run.sh
+
+          tests/expect-failure.sh env \
+            INPUT_IMAGE=ubuntu:24.04 \
+            INPUT_COMMAND=true \
+            INPUT_ENV=GITHUB_TOKEN=dummy \
+            actions/docker-sandbox/run.sh
+
+          tests/expect-failure.sh env \
+            INPUT_IMAGE=ubuntu:24.04 \
+            INPUT_COMMAND=true \
+            INPUT_INHERIT_ENV=PATH \
+            actions/docker-sandbox/run.sh
+
   probe-script:
     name: Probe Script
     runs-on: ubuntu-latest
@@ -73,6 +93,10 @@ jobs:
 
       - name: Fails when host PID namespace is visible
         run: |
+          bash -c 'sleep 120' Runner.Worker-sentinel &
+          sentinel_pid="$!"
+          trap 'kill "$sentinel_pid" 2>/dev/null || true' EXIT
+
           tests/expect-failure.sh docker run --rm \
             --user 1001 \
             --cap-drop=ALL \
@@ -97,6 +121,8 @@ jobs:
   action:
     name: Composite Action
     runs-on: ubuntu-latest
+    env:
+      INHERITED_TEST_VALUE: inherited
     steps:
       - uses: actions/checkout@v5
 
@@ -104,4 +130,14 @@ jobs:
         uses: ./
         with:
           image: ubuntu:24.04
-          command: test -f README.md && test -f LICENSE
+          env: |
+            USER_TEST_VALUE=explicit
+          inherit-env: |
+            INHERITED_TEST_VALUE
+          command: |
+            test -f README.md
+            test -f LICENSE
+            test "$USER_TEST_VALUE" = explicit
+            test "$INHERITED_TEST_VALUE" = inherited
+            test "$FORCE_COLOR" = 1
+            test "$TERM" = xterm-256color

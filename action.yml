@@ -23,14 +23,18 @@ inputs:
     description: Docker network mode.
     required: false
     default: bridge
-  setup:
-    description: Optional setup mode. Supported values are none and vite-plus.
-    required: false
-    default: none
   env:
     description: Newline-separated KEY=value entries passed to the sandbox command.
     required: false
     default: ""
+  inherit-env:
+    description: Newline, comma, or space separated variable names inherited from the caller environment.
+    required: false
+    default: ""
+  force-color:
+    description: Set color-related environment variables for the sandbox command.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -43,6 +47,7 @@ runs:
         INPUT_USER: ${{ inputs.user }}
         INPUT_PIDS_LIMIT: ${{ inputs.pids-limit }}
         INPUT_NETWORK: ${{ inputs.network }}
-        INPUT_SETUP: ${{ inputs.setup }}
         INPUT_ENV: ${{ inputs.env }}
+        INPUT_INHERIT_ENV: ${{ inputs.inherit-env }}
+        INPUT_FORCE_COLOR: ${{ inputs.force-color }}
       run: '"$GITHUB_ACTION_PATH/actions/docker-sandbox/run.sh"'

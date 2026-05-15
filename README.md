@@ -39,16 +39,21 @@ Pin the action to a full-length commit SHA.
 - name: Run compatibility in hardened sandbox
   uses: SegaraRai/gha-sandbox-probes@0123456789abcdef0123456789abcdef01234567
   with:
-    image: mcr.microsoft.com/playwright:v1.60.0-noble
+    image: ubuntu:24.04
     workspace: .
     user: "1001"
-    setup: vite-plus
     env: |
       CI=true
-      LINGUI_WASM_PREBUILT=1
       TMPDIR=/tmp
-    command: vp run test:compat --case "${{ matrix.case }}"
+    inherit-env: |
+      MATRIX_CASE
+    command: |
+      bash .github/scripts/run-compatibility.sh "$MATRIX_CASE"
 ```
+
+The action intentionally does not know how to install project dependencies. Run
+project-specific setup in `command`, or call a setup script that you own and pin
+by commit SHA.
 
 ## Use the Standalone Script
 
@@ -76,8 +81,47 @@ bash ./scripts/gha-sandbox-probe.sh
 | `user` | no | `1001` | Container user. |
 | `pids-limit` | no | `512` | Docker process limit. |
 | `network` | no | `bridge` | Docker network mode. Use `none` only when the command needs no network. |
-| `setup` | no | `none` | Optional setup. Currently supports `none` and `vite-plus`. |
 | `env` | no | | Newline-separated `KEY=value` entries passed to the sandbox command. |
+| `inherit-env` | no | | Newline, comma, or space separated variable names inherited from the caller environment. |
+| `force-color` | no | `true` | Sets `TERM`, `COLORTERM`, `FORCE_COLOR`, and `CLICOLOR_FORCE` for tools that disable color in non-TTY CI output. |
+
+The action refuses to pass known sensitive GitHub Actions variables such as
+`ACTIONS_RUNTIME_TOKEN`, `ACTIONS_CACHE_URL`, `ACTIONS_RESULTS_URL`,
+`ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `GITHUB_TOKEN`, GitHub file-command paths such
+as `GITHUB_ENV` and `GITHUB_OUTPUT`, and package publishing tokens.
+`HOME` is always managed by the sandbox. `PATH` can be set explicitly with
+`env`, but it cannot be inherited from the host environment.
+
+## Project Setup
+
+Keep setup separate from the sandbox runner. For example, a repository can own a
+script such as `.github/scripts/setup-vite-plus.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+curl -fsSL --connect-timeout 5 --max-time 15 https://viteplus.dev/install.sh | bash
+. "$HOME/.vite-plus/env"
+
+if [ -f .node-version ]; then
+  vp env use "$(cat .node-version)"
+fi
+
+vp install
+```
+
+Then call it from `command`:
+
+```yaml
+with:
+  command: |
+    bash .github/scripts/setup-vite-plus.sh
+    vp run test:compat --case "$MATRIX_CASE"
+```
+
+This keeps project policy out of the generic sandbox action and makes setup
+changes reviewable in the consuming repository.
 
 ## Standalone Script Environment
 
