@@ -16,6 +16,10 @@ The probes fail closed. If a required sandbox boundary is broken, the script exi
 
 Pin the action to a full-length commit SHA.
 
+> [!NOTE]
+> This repository intentionally does not publish moving tags such as `v1` or release tags for the action.
+> Consumers should pin the action to a full-length commit SHA so reviews can verify the exact code that will run in privileged workflow context.
+
 ```yaml
 - uses: actions/checkout@v5
   with:
