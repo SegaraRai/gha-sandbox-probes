@@ -20,17 +20,25 @@ inputs:
     required: false
     default: "512"
   network:
-    description: Docker network mode.
+    description: Docker network mode. Defaults to none; use bridge only when the sandboxed command needs outbound network.
     required: false
-    default: bridge
+    default: none
   env:
     description: Newline-separated KEY=value entries passed to the sandbox command.
+    required: false
+    default: ""
+  unsafe-env:
+    description: Newline-separated KEY=value entries for sensitive CI environment variables that are intentionally exposed to the sandbox command.
     required: false
     default: ""
   inherit-env:
     description: Newline, comma, or space separated variable names inherited from the caller environment. Use auto for the curated non-sensitive default set, or none to disable it.
     required: false
     default: auto
+  unsafe-inherit-env:
+    description: Newline, comma, or space separated sensitive CI environment variable names intentionally inherited into the sandbox command.
+    required: false
+    default: ""
   disable-checks:
     description: Comma, space, or newline separated probe checks to disable after explicit risk acceptance.
     required: false
@@ -48,6 +56,8 @@ runs:
         INPUT_PIDS_LIMIT: ${{ inputs.pids-limit }}
         INPUT_NETWORK: ${{ inputs.network }}
         INPUT_ENV: ${{ inputs.env }}
+        INPUT_UNSAFE_ENV: ${{ inputs.unsafe-env }}
         INPUT_INHERIT_ENV: ${{ inputs.inherit-env }}
+        INPUT_UNSAFE_INHERIT_ENV: ${{ inputs.unsafe-inherit-env }}
         INPUT_DISABLE_CHECKS: ${{ inputs.disable-checks }}
       run: '"$GITHUB_ACTION_PATH/actions/docker-sandbox/run.sh"'

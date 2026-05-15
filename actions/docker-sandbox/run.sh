@@ -10,9 +10,11 @@ command="${INPUT_COMMAND:?command input is required}"
 workspace="${INPUT_WORKSPACE:-${GITHUB_WORKSPACE:-$PWD}}"
 user="${INPUT_USER:-1001}"
 pids_limit="${INPUT_PIDS_LIMIT:-512}"
-network="${INPUT_NETWORK:-bridge}"
+network="${INPUT_NETWORK:-none}"
 env_block="${INPUT_ENV:-}"
 inherit_env_block="${INPUT_INHERIT_ENV:-auto}"
+unsafe_env_block="${INPUT_UNSAFE_ENV:-}"
+unsafe_inherit_env_block="${INPUT_UNSAFE_INHERIT_ENV:-}"
 disable_checks="${INPUT_DISABLE_CHECKS:-}"
 
 if [ ! -f "$probe_script" ]; then
@@ -34,8 +36,41 @@ case "$network" in
     ;;
 esac
 
+is_hard_blocked_env_name() {
+  case "${1^^}" in
+    ACTIONS_CACHE_SERVICE_V2 | \
+    ACTIONS_CACHE_URL | \
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN | \
+    ACTIONS_ID_TOKEN_REQUEST_URL | \
+    ACTIONS_RESULTS_URL | \
+    ACTIONS_RUNTIME_TOKEN | \
+    ACTIONS_RUNTIME_URL | \
+    GH_TOKEN | \
+    GITHUB_ENV | \
+    GITHUB_OUTPUT | \
+    GITHUB_PATH | \
+    GITHUB_STATE | \
+    GITHUB_STEP_SUMMARY | \
+    GITHUB_TOKEN | \
+    GIT_ASKPASS | \
+    NETRC | \
+    NODE_AUTH_TOKEN | \
+    NPM_CONFIG_USERCONFIG | \
+    NPM_TOKEN | \
+    PIP_CONFIG_FILE | \
+    SSH_AGENT_PID | \
+    SSH_AUTH_SOCK)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 append_env_entry() {
   local entry="$1"
+  local risk_mode="${2:-safe}"
   local name="${entry%%=*}"
 
   if [[ ! "$entry" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
@@ -48,12 +83,18 @@ append_env_entry() {
     exit 1
   fi
 
+  if [ "$risk_mode" != "unsafe" ] && is_hard_blocked_env_name "$name"; then
+    echo "::error::Refusing sensitive CI environment variable without unsafe-env: $name"
+    exit 1
+  fi
+
   allowed_env_names+=("$name")
   docker_args+=(--env "$entry")
 }
 
 append_inherited_env_name() {
   local name="$1"
+  local risk_mode="${2:-safe}"
 
   [ -n "$name" ] || return
 
@@ -68,6 +109,11 @@ append_inherited_env_name() {
       exit 1
       ;;
   esac
+
+  if [ "$risk_mode" != "unsafe" ] && is_hard_blocked_env_name "$name"; then
+    echo "::error::Refusing sensitive CI environment variable without unsafe-inherit-env: $name"
+    exit 1
+  fi
 
   allowed_env_names+=("$name")
   docker_args+=(--env "$name")
@@ -119,9 +165,12 @@ docker_args=(
   --security-opt no-new-privileges
   --pids-limit "$pids_limit"
   --network "$network"
+  --entrypoint bash
   --env HOME=/tmp/home
   --env CI=true
   --env TMPDIR=/tmp
+  --env "SANDBOX_IMAGE=$image"
+  --env "SANDBOX_NETWORK=$network"
   --env SANDBOX_COMMAND="$command"
   --env "GHA_SANDBOX_DISABLE_CHECKS=$disable_checks"
   --volume "$workspace:/workspace:ro"
@@ -151,6 +200,17 @@ while IFS= read -r line; do
       ;;
   esac
 
+  append_env_entry "$line" unsafe
+done <<< "$unsafe_env_block"
+
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  case "$line" in
+    \#*)
+      continue
+      ;;
+  esac
+
   for name in ${line//,/ }; do
     case "${name,,}" in
       auto)
@@ -166,6 +226,19 @@ while IFS= read -r line; do
   done
 done <<< "$inherit_env_block"
 
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  case "$line" in
+    \#*)
+      continue
+      ;;
+  esac
+
+  for name in ${line//,/ }; do
+    append_inherited_env_name "$name" unsafe
+  done
+done <<< "$unsafe_inherit_env_block"
+
 if [ "${inherit_auto_env:-0}" = "1" ]; then
   append_auto_env_names
 fi
@@ -174,9 +247,25 @@ allowed_env_names_csv="$(IFS=,; echo "${allowed_env_names[*]}")"
 docker_args+=(--env "SANDBOX_ALLOWED_ENV_NAMES=$allowed_env_names_csv")
 docker_args+=(--env "GHA_SANDBOX_ALLOWED_ENV_NAMES=$allowed_env_names_csv")
 
-docker "${docker_args[@]}" "$image" bash -euo pipefail -s <<'SANDBOX_SCRIPT'
+docker "${docker_args[@]}" "$image" -euo pipefail -s <<'SANDBOX_SCRIPT'
+for required_tool in awk env grep head mkdir tar tr; do
+  if ! command -v "$required_tool" >/dev/null 2>&1; then
+    echo "::error::Sandbox image is missing required command: $required_tool"
+    exit 1
+  fi
+done
+
+echo "::group::Sandbox configuration"
+echo "image=$SANDBOX_IMAGE"
+echo "network=$SANDBOX_NETWORK"
+echo "workdir=/tmp/workspace"
+echo "workspace_mount=/workspace:ro"
+echo "disabled_checks=${GHA_SANDBOX_DISABLE_CHECKS:-}"
+echo "allowed_env_names=${SANDBOX_ALLOWED_ENV_NAMES:-}"
+echo "::endgroup::"
+
 mkdir -p "$HOME" /tmp/workspace
-tar -C /workspace -cf - . | tar -C /tmp/workspace -xf -
+tar -C /workspace --exclude='./.git' --exclude='.git' -cf - . | tar -C /tmp/workspace -xf -
 cd /tmp/workspace
 
 /probe-scripts/gha-sandbox-probe.sh

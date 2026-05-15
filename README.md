@@ -32,12 +32,17 @@ The probes are not a complete sandbox. They are runtime assertions that help ver
 Pin the action to a full-length commit SHA.
 
 ```yaml
+- uses: actions/checkout@v5
+  with:
+    persist-credentials: false
+
 - name: Run compatibility in hardened sandbox
   uses: SegaraRai/gha-sandbox-probes@0123456789abcdef0123456789abcdef01234567
   with:
     image: ubuntu:24.04
     workspace: .
     user: "1001"
+    network: none
     env: |
       CI=true
       TMPDIR=/tmp
@@ -47,7 +52,7 @@ Pin the action to a full-length commit SHA.
       bash .github/scripts/run-compatibility.sh "$MATRIX_CASE"
 ```
 
-The action intentionally does not know how to install project dependencies. Run project-specific setup in `command`, or call a setup script that you own and pin by commit SHA.
+The action intentionally does not know how to install project dependencies. Run project-specific setup in `command`, or call a setup script that you own and pin by commit SHA. If setup needs outbound network, opt in with `network: bridge`.
 
 ## Use the Standalone Script
 
@@ -56,8 +61,23 @@ Pin the raw URL to a full-length commit SHA.
 ```bash
 curl -fsSL \
   https://raw.githubusercontent.com/SegaraRai/gha-sandbox-probes/0123456789abcdef0123456789abcdef01234567/scripts/gha-sandbox-probe.sh \
-  | bash
+  -o gha-sandbox-probe.sh
+
+docker run --rm \
+  --user 1001 \
+  --cap-drop=ALL \
+  --security-opt no-new-privileges \
+  --pids-limit 128 \
+  --network none \
+  --volume "$PWD:/workspace:ro" \
+  --volume "$PWD/gha-sandbox-probe.sh:/probe.sh:ro" \
+  ubuntu:24.04 \
+  bash /probe.sh
 ```
+
+Run the standalone script inside the sandbox being evaluated. Running it
+directly on a normal runner shell is expected to fail checks such as
+`container-marker` and `zero-capabilities`.
 
 For submodules or vendored copies:
 
@@ -74,10 +94,26 @@ bash ./scripts/gha-sandbox-probe.sh
 | `workspace`      | no       | `${{ github.workspace }}` | Host path mounted read-only at `/workspace`.                                                                                                                                                      |
 | `user`           | no       | `1001`                    | Container user.                                                                                                                                                                                   |
 | `pids-limit`     | no       | `512`                     | Docker process limit.                                                                                                                                                                             |
-| `network`        | no       | `bridge`                  | Docker network mode. Use `none` only when the command needs no network.                                                                                                                           |
+| `network`        | no       | `none`                    | Docker network mode. Use `bridge` only when the sandboxed command needs outbound network.                                                                                                          |
 | `env`            | no       |                           | Newline-separated `KEY=value` entries passed to the sandbox command.                                                                                                                              |
+| `unsafe-env`     | no       |                           | Newline-separated `KEY=value` entries for sensitive CI environment variables that are intentionally exposed to the sandbox command.                                                                |
 | `inherit-env`    | no       | `auto`                    | Newline, comma, or space separated variable names inherited from the caller environment. Include `auto` to use the curated non-sensitive default set, or `none` to disable automatic inheritance. |
+| `unsafe-inherit-env` | no | | Newline, comma, or space separated sensitive CI environment variable names intentionally inherited into the sandbox command. |
 | `disable-checks` | no       |                           | Comma, space, or newline separated probe checks to disable after explicit risk acceptance.                                                                                                        |
+
+## Container Image Requirements
+
+The sandbox image must provide `bash`, `awk`, `env`, `grep`, `head`, `mkdir`,
+`tar`, and `tr`. The action overrides the image entrypoint with `bash`, so the
+image entrypoint cannot run before the probes. Minimal images such as
+distroless images, Alpine without Bash, or slim images missing these utilities
+will fail before the sandboxed command runs.
+
+The workspace is mounted read-only at `/workspace`, then copied to
+`/tmp/workspace` without `.git`. The sandboxed command runs from
+`/tmp/workspace`; changes made there do not persist to later workflow steps.
+This avoids exposing checkout credentials that may exist in Git metadata, but
+large repositories pay the cost of copying the workspace.
 
 ## Check Policy
 
@@ -135,9 +171,44 @@ This list is based on public tool documentation for GitHub Actions default varia
 
 Package registry, proxy, cloud, and private module environment variables are not inherited by default because they often contain credentials or private package names. Pass values explicitly with `env`, or inherit specific names with `inherit-env`, when you understand and accept the risk of exposing them to the sandboxed command.
 
+GitHub Actions runtime, cache, OIDC, file-command, package-token, SSH-agent,
+and similar CI credential variables are blocked from normal `env` and
+`inherit-env`. To expose one anyway, use `unsafe-env` or `unsafe-inherit-env`;
+these inputs are intentionally verbose because the sandboxed command can read
+and exfiltrate those values.
+
 Explicitly passed or inherited environment variable names are registered in `GHA_SANDBOX_ALLOWED_ENV_NAMES` before the probe runs. The probe excludes those names from environment variable name and URL-userinfo checks, but it still checks structural sandbox boundaries such as runner process visibility, container runtime sockets, credential files, metadata token endpoints, capabilities, and writable mounts.
 
 `HOME` is always managed by the sandbox. `PATH` can be set explicitly with `env`, but it cannot be inherited from the host environment.
+
+## Normal Runner Hardening
+
+A normal GitHub Actions job without an inner sandbox is not equivalent to this
+isolation model. Once untrusted code runs in a job, it can generally share that
+job's filesystem, network, process view, environment, checked-out files, caches,
+and available credentials. GitHub-hosted runners reduce cross-job persistence by
+providing fresh job environments, but they do not isolate steps within the same
+job.
+
+For jobs that cannot use this sandbox, reduce blast radius instead:
+
+- Keep untrusted code out of `pull_request_target` and `workflow_run` jobs with
+  secrets, write tokens, OIDC, or privileged cache access. GitHub warns that
+  running untrusted code in those contexts can lead to cache poisoning and
+  unintended access to secrets or write privileges.
+- Use top-level `permissions: {}` or least-privilege per-job permissions.
+- Use `actions/checkout` with `persist-credentials: false` unless the job needs
+  authenticated Git operations.
+- Grant `id-token: write` only in the exact publish/deploy job that needs OIDC,
+  and constrain cloud or registry trust policies by repository, ref, workflow,
+  environment, and audience.
+- Do not restore caches written by untrusted jobs into privileged publish or
+  deploy jobs. Treat cache contents as untrusted inputs.
+- Prefer deny-by-default egress controls and block cloud metadata endpoints,
+  especially on self-hosted or cloud-hosted runners.
+
+These controls are useful, but they reduce exposure rather than proving that
+arbitrary code cannot reach runner memory, job credentials, or shared job state.
 
 ## Project Setup
 
@@ -161,6 +232,7 @@ Then call it from `command`:
 
 ```yaml
 with:
+  network: bridge
   command: |
     bash .github/scripts/setup-vite-plus.sh
     vp run test:compat --case "$MATRIX_CASE"

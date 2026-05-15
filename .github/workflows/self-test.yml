@@ -15,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Check shell syntax
         run: |
           bash -n scripts/gha-sandbox-probe.sh
@@ -35,6 +37,12 @@ jobs:
             INPUT_ENV=HOME=/tmp/other-home \
             actions/docker-sandbox/run.sh
 
+          tests/expect-failure.sh env \
+            INPUT_IMAGE=ubuntu:24.04 \
+            INPUT_COMMAND=true \
+            INPUT_ENV=GITHUB_TOKEN=dummy \
+            actions/docker-sandbox/run.sh
+
       - name: Refuses unknown disabled check names
         run: |
           tests/expect-failure.sh docker run --rm \
@@ -52,6 +60,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Passes in a hardened container
         run: |
@@ -64,6 +74,22 @@ jobs:
             --volume "$PWD:/workspace:ro" \
             ubuntu:24.04 \
             bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Image entrypoint does not run before probes
+        run: |
+          tmp_image_dir="$(mktemp -d)"
+          trap 'rm -rf "$tmp_image_dir"' EXIT
+          cat > "$tmp_image_dir/Dockerfile" <<'EOF'
+          FROM ubuntu:24.04
+          ENTRYPOINT ["bash", "-lc", "echo entrypoint-ran >/entrypoint-ran; exec \"$@\"", "--"]
+          EOF
+          docker build -t gha-sandbox-entrypoint-test "$tmp_image_dir"
+
+          env \
+            INPUT_IMAGE=gha-sandbox-entrypoint-test \
+            INPUT_COMMAND='test ! -e /entrypoint-ran' \
+            INPUT_INHERIT_ENV=none \
+            actions/docker-sandbox/run.sh
 
       - name: Fails when capabilities are present
         run: |
@@ -277,6 +303,8 @@ jobs:
       TERM: xterm-256color
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Run local action
         uses: ./
@@ -286,14 +314,31 @@ jobs:
             USER_TEST_VALUE=explicit
             FAKE_TOKEN=dummy
             REGISTRY_URL=https://user:password@example.com
+          unsafe-env: |
+            GITHUB_TOKEN=dummy
           inherit-env: |
             INHERITED_TEST_VALUE
           command: |
             test -f README.md
             test -f LICENSE
+            test ! -e .git
             test "$USER_TEST_VALUE" = explicit
             test "$FAKE_TOKEN" = dummy
             test "$REGISTRY_URL" = https://user:password@example.com
+            test "$GITHUB_TOKEN" = dummy
             test "$INHERITED_TEST_VALUE" = inherited
             test "$FORCE_COLOR" = 1
             test "$TERM" = xterm-256color
+
+      - name: Run nested action entrypoint
+        uses: ./actions/docker-sandbox
+        with:
+          image: ubuntu:24.04
+          disable-checks: |
+            environment
+          unsafe-env: |
+            GITHUB_TOKEN=dummy
+          command: |
+            test -f README.md
+            test ! -e .git
+            test "$GITHUB_TOKEN" = dummy
