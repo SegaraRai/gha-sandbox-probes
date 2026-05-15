@@ -170,6 +170,7 @@ require_linux_proc() {
 }
 
 require_container_marker() {
+  # Check ID: container-marker
   if [ -f /.dockerenv ]; then
     return
   fi
@@ -182,6 +183,7 @@ require_container_marker() {
 }
 
 require_zero_capabilities() {
+  # Check ID: zero-capabilities
   local cap_eff
 
   if [ ! -r /proc/self/status ]; then
@@ -197,6 +199,7 @@ require_zero_capabilities() {
 }
 
 deny_docker_daemon_access() {
+  # Check ID: container-runtime-sockets
   local socket_path
   local socket_paths=(
     /var/run/docker.sock
@@ -235,6 +238,7 @@ deny_docker_daemon_access() {
 }
 
 deny_actions_runtime_credentials() {
+  # Check ID: environment
   if is_check_disabled environment; then
     notice "Sandbox probe check disabled by explicit risk acceptance: environment"
     return
@@ -293,6 +297,7 @@ deny_actions_runtime_credentials() {
 }
 
 deny_host_runner_process_visibility() {
+  # Check ID: runner-processes
   local cmdline pid command environ mem
   local patterns=(
     Runner.Worker
@@ -346,6 +351,7 @@ file_has_secret_marker() {
 }
 
 deny_credential_files() {
+  # Check ID: credential-files
   if is_check_disabled credential-files; then
     notice "Sandbox probe check disabled by explicit risk acceptance: credential-files"
     return
@@ -445,6 +451,7 @@ http_body() {
 }
 
 deny_cloud_metadata_access() {
+  # Check IDs: cloud-metadata, cloud-metadata-aws, cloud-metadata-azure, cloud-metadata-gcp
   local aws_token token_response response response_body
 
   if is_check_disabled cloud-metadata-aws; then
@@ -488,6 +495,7 @@ deny_cloud_metadata_access() {
 }
 
 deny_writable_readonly_paths() {
+  # Check ID: readonly-paths
   if is_check_disabled readonly-paths; then
     notice "Sandbox probe check disabled by explicit risk acceptance: readonly-paths"
     return
