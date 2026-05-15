@@ -12,7 +12,7 @@ error() {
   failures=$((failures + 1))
 }
 
-is_sensitive_env_name() {
+is_hard_blocked_env_name() {
   case "${1^^}" in
     ACTIONS_CACHE_SERVICE_V2 | \
     ACTIONS_CACHE_URL | \
@@ -38,6 +38,14 @@ is_sensitive_env_name() {
     SSH_AUTH_SOCK)
       return 0
       ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_sensitive_env_name() {
+  case "${1^^}" in
     TOKEN | \
     TOKEN_* | \
     *_TOKEN | \
@@ -64,6 +72,22 @@ is_sensitive_env_name() {
 
 has_url_credentials() {
   [[ "$1" =~ ://[^/@]+@ ]]
+}
+
+is_allowed_env_name() {
+  local expected="$1"
+  local allowed_names="${GHA_SANDBOX_ALLOWED_ENV_NAMES:-${SANDBOX_ALLOWED_ENV_NAMES:-}}"
+  local name
+
+  allowed_names="${allowed_names//,/ }"
+
+  for name in $allowed_names; do
+    if [ "$name" = "$expected" ]; then
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 is_zero_hex() {
@@ -179,12 +203,20 @@ deny_actions_runtime_credentials() {
 
   for key in "${keys[@]}"; do
     value="${!key-}"
-    if [ -n "$value" ]; then
+    if [ -n "$value" ] && ! is_allowed_env_name "$key"; then
       error "Sensitive CI credential environment variable is visible: $key"
     fi
   done
 
   while IFS='=' read -r key value; do
+    if is_allowed_env_name "$key"; then
+      continue
+    fi
+
+    if is_hard_blocked_env_name "$key"; then
+      continue
+    fi
+
     if is_sensitive_env_name "$key"; then
       error "Potentially sensitive environment variable is visible: $key"
     fi

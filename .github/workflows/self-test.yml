@@ -21,20 +21,8 @@ jobs:
           bash -n actions/docker-sandbox/run.sh
           bash -n tests/expect-failure.sh
 
-      - name: Refuses sensitive environment forwarding
+      - name: Refuses host-specific environment forwarding
         run: |
-          tests/expect-failure.sh env \
-            INPUT_IMAGE=ubuntu:24.04 \
-            INPUT_COMMAND=true \
-            INPUT_INHERIT_ENV=GITHUB_ENV \
-            actions/docker-sandbox/run.sh
-
-          tests/expect-failure.sh env \
-            INPUT_IMAGE=ubuntu:24.04 \
-            INPUT_COMMAND=true \
-            INPUT_ENV=GITHUB_TOKEN=dummy \
-            actions/docker-sandbox/run.sh
-
           tests/expect-failure.sh env \
             INPUT_IMAGE=ubuntu:24.04 \
             INPUT_COMMAND=true \
@@ -44,7 +32,7 @@ jobs:
           tests/expect-failure.sh env \
             INPUT_IMAGE=ubuntu:24.04 \
             INPUT_COMMAND=true \
-            INPUT_ENV=REGISTRY_URL=https://user:password@example.com \
+            INPUT_ENV=HOME=/tmp/other-home \
             actions/docker-sandbox/run.sh
 
   probe-script:
@@ -116,6 +104,22 @@ jobs:
             --cap-drop=ALL \
             --security-opt no-new-privileges \
             --env REGISTRY_URL=https://user:password@example.com \
+            --volume "$PWD/scripts:/probe-scripts:ro" \
+            --volume "$PWD:/workspace:ro" \
+            ubuntu:24.04 \
+            bash /probe-scripts/gha-sandbox-probe.sh
+
+      - name: Allows explicitly accepted environment risk
+        run: |
+          docker run --rm \
+            --user 1001 \
+            --cap-drop=ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 128 \
+            --network none \
+            --env ACTIONS_RUNTIME_TOKEN=dummy \
+            --env REGISTRY_URL=https://user:password@example.com \
+            --env GHA_SANDBOX_ALLOWED_ENV_NAMES=ACTIONS_RUNTIME_TOKEN,REGISTRY_URL \
             --volume "$PWD/scripts:/probe-scripts:ro" \
             --volume "$PWD:/workspace:ro" \
             ubuntu:24.04 \
@@ -204,12 +208,16 @@ jobs:
           image: ubuntu:24.04
           env: |
             USER_TEST_VALUE=explicit
+            FAKE_TOKEN=dummy
+            REGISTRY_URL=https://user:password@example.com
           inherit-env: |
             INHERITED_TEST_VALUE
           command: |
             test -f README.md
             test -f LICENSE
             test "$USER_TEST_VALUE" = explicit
+            test "$FAKE_TOKEN" = dummy
+            test "$REGISTRY_URL" = https://user:password@example.com
             test "$INHERITED_TEST_VALUE" = inherited
             test "$FORCE_COLOR" = 1
             test "$TERM" = xterm-256color

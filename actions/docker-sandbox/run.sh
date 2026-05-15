@@ -33,74 +33,12 @@ case "$network" in
     ;;
 esac
 
-is_blocked_env_name() {
-  local name="${1^^}"
-
-  case "$name" in
-    ACTIONS_CACHE_SERVICE_V2 | \
-    ACTIONS_CACHE_URL | \
-    ACTIONS_ID_TOKEN_REQUEST_TOKEN | \
-    ACTIONS_ID_TOKEN_REQUEST_URL | \
-    ACTIONS_RESULTS_URL | \
-    ACTIONS_RUNTIME_TOKEN | \
-    ACTIONS_RUNTIME_URL | \
-    GH_TOKEN | \
-    GITHUB_ENV | \
-    GITHUB_OUTPUT | \
-    GITHUB_PATH | \
-    GITHUB_STATE | \
-    GITHUB_STEP_SUMMARY | \
-    GITHUB_TOKEN | \
-    GIT_ASKPASS | \
-    NETRC | \
-    NODE_AUTH_TOKEN | \
-    NPM_CONFIG_USERCONFIG | \
-    NPM_TOKEN | \
-    PIP_CONFIG_FILE | \
-    SSH_AGENT_PID | \
-    SSH_AUTH_SOCK)
-      return 0
-      ;;
-    TOKEN | \
-    TOKEN_* | \
-    *_TOKEN | \
-    *_TOKEN_* | \
-    *AUTH_TOKEN* | \
-    *SECRET* | \
-    *PASSWORD* | \
-    *PASSWD* | \
-    *_PASS | \
-    *PRIVATE_KEY* | \
-    *ACCESS_KEY* | \
-    *API_KEY* | \
-    *CREDENTIAL* | \
-    *COOKIE* | \
-    *_SESSION_TOKEN | \
-    *_SESSION_COOKIE)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 append_env_entry() {
   local entry="$1"
   local name="${entry%%=*}"
 
   if [[ ! "$entry" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
     echo "::error::Invalid environment entry: $entry"
-    exit 1
-  fi
-
-  if is_blocked_env_name "$name"; then
-    echo "::error::Refusing to pass sensitive CI environment variable: $name"
-    exit 1
-  fi
-
-  if [[ "${entry#*=}" =~ ://[^/@]+@ ]]; then
-    echo "::error::Refusing to pass environment variable containing URL credentials: $name"
     exit 1
   fi
 
@@ -120,11 +58,6 @@ append_inherited_env_name() {
 
   if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
     echo "::error::Invalid inherited environment variable name: $name"
-    exit 1
-  fi
-
-  if is_blocked_env_name "$name"; then
-    echo "::error::Refusing to inherit sensitive CI environment variable: $name"
     exit 1
   fi
 
@@ -237,6 +170,7 @@ fi
 
 allowed_env_names_csv="$(IFS=,; echo "${allowed_env_names[*]}")"
 docker_args+=(--env "SANDBOX_ALLOWED_ENV_NAMES=$allowed_env_names_csv")
+docker_args+=(--env "GHA_SANDBOX_ALLOWED_ENV_NAMES=$allowed_env_names_csv")
 
 docker "${docker_args[@]}" "$image" bash -euo pipefail -s <<'SANDBOX_SCRIPT'
 mkdir -p "$HOME" /tmp/workspace
