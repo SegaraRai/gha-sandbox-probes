@@ -56,6 +56,14 @@ jobs:
             ubuntu:24.04 \
             bash /probe-scripts/gha-sandbox-probe.sh
 
+      - name: Propagates sandbox command failure
+        run: |
+          tests/expect-failure.sh env \
+            INPUT_IMAGE=ubuntu:24.04 \
+            INPUT_COMMAND='echo "sandbox command executed"; exit 86' \
+            INPUT_INHERIT_ENV=none \
+            actions/docker-sandbox/run.sh
+
   probe-script:
     name: Probe Script
     runs-on: ubuntu-latest

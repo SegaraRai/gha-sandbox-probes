@@ -160,6 +160,7 @@ append_auto_env_names() {
 docker_args=(
   run
   --rm
+  --interactive
   --user "$user"
   --cap-drop=ALL
   --security-opt no-new-privileges
@@ -247,6 +248,7 @@ allowed_env_names_csv="$(IFS=,; echo "${allowed_env_names[*]}")"
 docker_args+=(--env "SANDBOX_ALLOWED_ENV_NAMES=$allowed_env_names_csv")
 docker_args+=(--env "GHA_SANDBOX_ALLOWED_ENV_NAMES=$allowed_env_names_csv")
 
+echo "gha-sandbox-probes: starting sandbox container"
 docker "${docker_args[@]}" "$image" -euo pipefail -s <<'SANDBOX_SCRIPT'
 for required_tool in awk env grep head mkdir tar tr; do
   if ! command -v "$required_tool" >/dev/null 2>&1; then
@@ -268,7 +270,9 @@ mkdir -p "$HOME" /tmp/workspace
 tar -C /workspace --exclude='./.git' --exclude='.git' -cf - . | tar -C /tmp/workspace -xf -
 cd /tmp/workspace
 
+echo "gha-sandbox-probes: running sandbox probes"
 /probe-scripts/gha-sandbox-probe.sh
+echo "gha-sandbox-probes: sandbox probes passed"
 
 allowed_env=(
   HOME="$HOME"
@@ -293,5 +297,7 @@ for name in "${sandbox_allowed_names[@]}"; do
   esac
 done
 
+echo "gha-sandbox-probes: running sandbox command"
 env -i "${allowed_env[@]}" bash -lc "$SANDBOX_COMMAND"
+echo "gha-sandbox-probes: sandbox command completed"
 SANDBOX_SCRIPT
